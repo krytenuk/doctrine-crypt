@@ -1,0 +1,19 @@
+<?php
+return [
+    'doctrine-crypt' => [
+        'rsaPrivateKeyFile' => 'rsa/key.pem', // <- path and filename of your rsa private key @see https://docs.rightscale.com/faq/How_Do_I_Generate_My_Own_SSH_Key_Pair.html
+        'rsaPublicKeyFile' => 'rsa/key.pub', // <- path and filename of your rsa public key
+        'rsaKeyPassphrase' => 'M0T0R0LA', // Optional passphrase used when creating the above keys
+    ],
+    'entities' => [
+        [
+            'class' => YourEntity::class,
+            'properties' => [
+                'firstProperty',
+                'secondProperty',
+                // ...
+            ],
+        ],
+        // ...
+    ],
+];
