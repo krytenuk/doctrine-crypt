@@ -2,6 +2,7 @@
 
 namespace FwsDoctrineCrypt\Command;
 
+use FwsDoctrineCrypt\Model\Crypt;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
@@ -37,7 +38,7 @@ class DecryptCommand extends AbstractCommand
     {
         $this->init($input, $output);
 
-        $output->writeln('Decrypting database records');
+        $output->writeln(sprintf('Decrypting database records using %s decryption', Crypt::$cryptNames[$this->crypt->getEncryptionMethod()]));
 
         $processed = $this->processEntities(self::DECRYPT);
         if ($processed) {

@@ -21,8 +21,8 @@ use Symfony\Component\Console\Question\ConfirmationQuestion;
  */
 abstract class AbstractCommand extends Command
 {
-    const ENCRYPT = 'rsaEncrypt';
-    const DECRYPT = 'rsaDecrypt';
+    const ENCRYPT = 'encrypt';
+    const DECRYPT = 'decrypt';
     const BATCH_SIZE = 20;
 
     protected InputInterface $input;
@@ -82,7 +82,7 @@ abstract class AbstractCommand extends Command
     {
         $returnArray = [];
 
-        foreach (($this->config['doctrine-crypt']['entities'] ?? []) as $entityConfig) {
+        foreach (($this->config['doctrineCrypt']['entities'] ?? []) as $entityConfig) {
             $class = $entityConfig['class'];
             if (!$class) {
                 $this->output->writeln('<warning>Missing entity class in config</warning>');
@@ -185,8 +185,7 @@ abstract class AbstractCommand extends Command
                     $this->hydrator->hydrate($toHydrate, $entity);
                 }
 
-                ++$count;
-                if (($count % self::BATCH_SIZE) === 0) {
+                if ((++$count % self::BATCH_SIZE) === 0) {
                     if ($this->input->getOption('dry-run')) {
                         $this->entityManager->flush();
                     }
@@ -218,6 +217,11 @@ abstract class AbstractCommand extends Command
             if (!$value) {
                 $returnProperties[$name] = $value;
                 continue;
+            }
+            if ($method === self::ENCRYPT) {
+                if ($this->crypt->isEncrypted($value)) {
+                    continue;
+                }
             }
             $processedValue = $this->crypt->$method((string) $value) ?? $value;
             $returnProperties[$name] = $processedValue;

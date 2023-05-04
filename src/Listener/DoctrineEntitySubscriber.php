@@ -25,7 +25,7 @@ class DoctrineEntitySubscriber implements EventSubscriber
         $this->cryptModel = new Crypt($config);
 
         /** Check if doctrine-crypt keys set in config */
-        $entitiesConfig = $config['doctrine-crypt']['entities'] ?? null;
+        $entitiesConfig = $config['doctrineCrypt']['entities'] ?? null;
         if ($entitiesConfig === null) {
             throw new DoctrineCryptException('Doctrine crypt entities config not set');
         }
@@ -150,7 +150,7 @@ class DoctrineEntitySubscriber implements EventSubscriber
      */
     private function deCrypt(object $entity): void
     {
-        $this->crypt('rsaDecrypt', $entity);
+        $this->crypt('decrypt', $entity);
     }
 
     /**
@@ -161,7 +161,7 @@ class DoctrineEntitySubscriber implements EventSubscriber
      */
     private function encrypt(object $entity): void
     {
-        $this->crypt('rsaEncrypt', $entity);
+        $this->crypt('encrypt', $entity);
     }
 
     /**
