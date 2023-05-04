@@ -15,21 +15,21 @@ use FwsDoctrineCrypt\Exception\DoctrineCryptException;
  */
 class Crypt
 {
-    const CRYPT_BLOCKCIPHER = 'blockcipher';
+    const CRYPT_BLOCK_CIPHER = 'block-cipher';
     const CRYPT_RSA = 'rsa';
 
     static array $allowedCrypts = [
-        self::CRYPT_BLOCKCIPHER,
+        self::CRYPT_BLOCK_CIPHER,
         self::CRYPT_RSA,
     ];
 
     static array $cryptNames = [
-        self::CRYPT_BLOCKCIPHER => 'Block Cipher',
+        self::CRYPT_BLOCK_CIPHER => 'Block Cipher',
         self::CRYPT_RSA => 'RSA Key Encryption',
     ];
 
     private BlockCipher|Rsa $crypt;
-    private string $encryptionMethod;
+    private ?string $encryptionMethod;
 
     /**
      *
@@ -38,9 +38,9 @@ class Crypt
      */
     public function __construct(array $config)
     {
-        $this->encryptionMethod = (string) $config['doctrineCrypt']['encryptionMethod'] ?? null;
+        $this->encryptionMethod = $config['doctrineCrypt']['encryptionMethod'] ?? null;
         if (!$this->encryptionMethod) {
-            throw new DoctrineCryptException('encryptionType is not set in config');
+            throw new DoctrineCryptException('encryptionMethod is not set in config');
         }
 
         if (!in_array($this->encryptionMethod, self::$allowedCrypts)) {
@@ -52,7 +52,7 @@ class Crypt
         }
 
         switch ($this->encryptionMethod) {
-            case self::CRYPT_BLOCKCIPHER:
+            case self::CRYPT_BLOCK_CIPHER:
                 $this->setBlockCipher($config);
                 break;
             case self::CRYPT_RSA:
