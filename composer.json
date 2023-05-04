@@ -37,7 +37,7 @@
   "type": "module",
   "homepage": "https://github.com/krytenuk/fws-doctrine-auth",
   "extra": {
-    "zf": {
+    "laminas": {
       "module": "FwsDoctrineCrypt"
     }
   },
