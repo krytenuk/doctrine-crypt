@@ -9,13 +9,13 @@ return [
         * @see https://docs.laminas.dev/laminas-crypt/block-cipher/
         * @see https://docs.laminas.dev/laminas-crypt/public-key/#rsa
         */
-        'encryptionMethod' => Crypt::CRYPT_BLOCKCIPHER,
+        'encryptionMethod' => Crypt::CRYPT_BLOCK_CIPHER,
         // for Block Cipher encryption
         'encryptionKey' => 'your_encryption_key',
         // for RSA encryption
         'rsaPrivateKeyFile' => 'rsa/key.pem', // <- path and filename of your rsa private key @see https://docs.rightscale.com/faq/How_Do_I_Generate_My_Own_SSH_Key_Pair.html
         'rsaPublicKeyFile' => 'rsa/key.pub', // <- path and filename of your rsa public key
-        'rsaKeyPassphrase' => 'M0T0R0LA', // Optional passphrase used when creating the above keys
+        'rsaKeyPassphrase' => 'YourPassphrase', // Optional passphrase used when creating the above keys
         'entities' => [
             [
                 'class' => YourEntity::class,
