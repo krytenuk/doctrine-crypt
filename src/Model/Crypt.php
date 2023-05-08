@@ -2,6 +2,8 @@
 
 namespace FwsDoctrineCrypt\Model;
 
+
+use Doctrine\ORM\EntityManager;
 use Exception;
 use Laminas\Crypt\BlockCipher;
 use Laminas\Crypt\PublicKey\Rsa;
@@ -28,27 +30,32 @@ class Crypt
         self::CRYPT_RSA => 'RSA Key Encryption',
     ];
 
-    private BlockCipher|Rsa $crypt;
-    private ?string $encryptionMethod;
+    protected BlockCipher|Rsa $crypt;
+    protected ?string $encryptionMethod;
+    protected array $properties = [];
+    protected array $entities = [];
 
     /**
      *
+     * @param EntityManager $entityManager
      * @param array $config
      * @throws DoctrineCryptException
      */
-    public function __construct(array $config)
+    public function __construct(
+        protected EntityManager $entityManager,
+        protected array $config
+    )
     {
+        /** Check if encryption method is set in config */
         $this->encryptionMethod = $config['doctrineCrypt']['encryptionMethod'] ?? null;
         if (!$this->encryptionMethod) {
             throw new DoctrineCryptException('encryptionMethod is not set in config');
         }
 
-        if (!in_array($this->encryptionMethod, self::$allowedCrypts)) {
-            throw new DoctrineCryptException(sprintf(
-                'encryptionType %f is not a supported encryption method, expected one of %s',
-                $this->encryptionMethod,
-                implode(', ', self::$allowedCrypts)
-            ));
+        /** Check if entities set in config */
+        $entitiesConfig = $config['doctrineCrypt']['entities'] ?? null;
+        if ($entitiesConfig === null) {
+            throw new DoctrineCryptException('Doctrine crypt entities config not set');
         }
 
         switch ($this->encryptionMethod) {
@@ -57,7 +64,30 @@ class Crypt
                 break;
             case self::CRYPT_RSA:
                 $this->setRsa($config);
+                break;
+            default: // invalid encryption method
+                throw new DoctrineCryptException(sprintf(
+                    'encryptionType %f is not a supported encryption method, expected one of %s',
+                    $this->encryptionMethod,
+                    implode(', ', self::$allowedCrypts)
+                ));
         }
+
+        /** Store entities properties */
+        foreach ($entitiesConfig as $entity) {
+            if (!is_array($entity)) {
+                continue;
+            }
+
+            if (!(array_key_exists('class', $entity) && array_key_exists('properties', $entity))) {
+                continue;
+            }
+
+            $properties = array_merge(($this->entities[$entity['class']] ?? []), $entity['properties']);
+            $this->entities[$entity['class']] = $properties;
+            $this->properties = array_merge($this->properties, $entity['properties']);
+        }
+        $this->properties = array_unique($this->properties);
     }
 
     /**
@@ -113,6 +143,15 @@ class Crypt
     }
 
     /**
+     * Get entities and their properties to process
+     * @return array
+     */
+    public function getEntityPropertiesFromConfig(): array
+    {
+        return $this->entities;
+    }
+
+    /**
      * Encrypt and return value, null on failure
      * @param string $value
      * @return string|null
@@ -140,6 +179,7 @@ class Crypt
         }
         
     }
+
     /**
      * Check if value is encrypted
      * @param $value
@@ -149,6 +189,32 @@ class Crypt
     {
         $decrypted = $this->decrypt((string) $value) ?? $value;
         return $decrypted !== $value;
+    }
+
+    /**
+     * Decrypt an array returned from Doctrine with AbstractQuery::HYDRATE_ARRAY hydration
+     * @param array $array
+     * @return array
+     */
+    public function decryptArray(array $array): array
+    {
+        foreach ($array as $key => $value) {
+            if (is_array($value)) {
+                $array[$key] = $this->decryptArray($value);
+                continue;
+            }
+
+            if (!is_scalar($value) || is_bool($value) || !$value) {
+                continue;
+            }
+
+            if (!in_array($key, $this->properties)) {
+                continue;
+            }
+
+            $array[$key] = $this->decrypt((string) $value) ?? $value;
+        }
+        return $array;
     }
 
     /**

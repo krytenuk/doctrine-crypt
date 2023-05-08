@@ -28,22 +28,21 @@ abstract class AbstractCommand extends Command
     protected InputInterface $input;
     protected OutputInterface $output;
 
-    protected Crypt $crypt;
     protected DoctrineObject $hydrator;
+    protected array $entities;
 
     /**
      *
      * @param EntityManagerInterface $entityManager
-     * @param array $config Laminas config
-     * @throws DoctrineCryptException
+     * @param Crypt $crypt
      */
     public function __construct(
         protected EntityManagerInterface $entityManager,
-        protected array $config
+        protected Crypt $crypt
     )
     {
-        $this->crypt = new Crypt($this->config);
         $this->hydrator = new DoctrineObject($this->entityManager);
+        $this->entities = $this->crypt->getEntityPropertiesFromConfig();
         parent::__construct();
     }
 
@@ -75,31 +74,6 @@ abstract class AbstractCommand extends Command
     }
 
     /**
-     * Get the entities that require encryption/decryption
-     * @return array
-     */
-    protected function getEntitiesFromConfig(): array
-    {
-        $returnArray = [];
-
-        foreach (($this->config['doctrineCrypt']['entities'] ?? []) as $entityConfig) {
-            $class = $entityConfig['class'];
-            if (!$class) {
-                $this->output->writeln('<warning>Missing entity class in config</warning>');
-                continue;
-            }
-            $properties = $entityConfig['properties'] ?? null;
-            if (!$properties || !is_array($properties)) {
-                $this->output->writeln('<warning>Missing entity properties for $class in config</warning>');
-                continue;
-            }
-            $returnArray[$class] = array_merge(($returnArray[$class] ?? []), $properties);
-        }
-
-        return $returnArray;
-    }
-
-    /**
      * Get entity repository
      * @param string $entityName
      * @return EntityRepository|null
@@ -121,6 +95,12 @@ abstract class AbstractCommand extends Command
      */
     protected function processEntities(string $method): bool
     {
+        /** Get entities to process */
+        if (!$this->entities) {
+            $this->output->writeln('<error>No entities found in config</error>');
+            return false;
+        }
+
         if (!$this->input->getOption('dry-run')) {
             $this->output->writeln([
                 '<warning>This will change the database records for the entities in your configuration</warning>',
@@ -136,14 +116,7 @@ abstract class AbstractCommand extends Command
             }
         }
 
-        /** Get entities to process from config */
-        $entities = $this->getEntitiesFromConfig();
-        if (!$entities) {
-            $this->output->writeln('<error>No entities found in config</error>');
-            return false;
-        }
-
-        foreach ($entities as $entityClass => $entityProperties) {
+        foreach ($this->entities as $entityClass => $entityProperties) {
 
             if (!$entityProperties) {
                 $this->output->writeln("<error>No properties specified for entity $entityClass in config</error>");

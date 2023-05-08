@@ -5,6 +5,7 @@ namespace FwsDoctrineCrypt;
 use Doctrine\ORM\Tools\Console\ConsoleRunner;
 use FwsDoctrineCrypt\Exception\DoctrineCryptException;
 use FwsDoctrineCrypt\Listener\DoctrineEntitySubscriber;
+use FwsDoctrineCrypt\Model\Crypt;
 use Laminas\EventManager\EventInterface;
 use Laminas\ModuleManager\Feature\BootstrapListenerInterface;
 use Laminas\ModuleManager\ModuleManagerInterface;
@@ -23,14 +24,15 @@ class Module implements BootstrapListenerInterface
     public function onBootstrap(EventInterface $e): void
     {
         $serviceManager = $e->getApplication()->getServiceManager();
-        $request = $e->getApplication()->getRequest();
 
         /** Add doctrine subscriber if not cli command */
-        if ($request->getServer()->get('SHELL') === null) {
+        if (!($_SERVER["argv"] ?? null)) {
             $serviceManager
                 ->get(EntityManager::class)
                 ->getEventManager()
-                ->addEventSubscriber(new DoctrineEntitySubscriber($serviceManager->get('config')));
+                ->addEventSubscriber(new DoctrineEntitySubscriber(
+                    $serviceManager->get(Crypt::class)
+                ));
         }
     }
 
@@ -56,11 +58,11 @@ class Module implements BootstrapListenerInterface
             $cli = $event->getTarget();
             /* @var $entityManager EntityManager */
             $entityManager = $cli->getHelperSet()->get('em')->getEntityManager();
-            $config = $event->getParam('ServiceManager')->get('config');
+            $crypt = $event->getParam('ServiceManager')->get(Crypt::class);
             ConsoleRunner::addCommands($cli);
             $cli->addCommands([
-                new Command\EncryptCommand($entityManager, $config),
-                new Command\DecryptCommand($entityManager, $config),
+                new Command\EncryptCommand($entityManager, $crypt),
+                new Command\DecryptCommand($entityManager, $crypt),
             ]);
         });
     }

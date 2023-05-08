@@ -14,37 +14,13 @@ class DoctrineEntitySubscriber implements EventSubscriber
 {
     private array $entities = [];
     private ?DoctrineObject $hydrator = null;
-    private ?Crypt $cryptModel;
 
     /**
-     * @param array $config Laminas configuration
-     * @throws DoctrineCryptException
+     * @param Crypt $cryptModel
      */
-    public function __construct(array $config)
+    public function __construct(private Crypt $cryptModel)
     {
-        $this->cryptModel = new Crypt($config);
-
-        /** Check if doctrine-crypt keys set in config */
-        $entitiesConfig = $config['doctrineCrypt']['entities'] ?? null;
-        if ($entitiesConfig === null) {
-            throw new DoctrineCryptException('Doctrine crypt entities config not set');
-        }
-
-        /** Store entities properties */
-        foreach ($entitiesConfig as $entity) {
-            if (!is_array($entity)) {
-                continue;
-            }
-
-            if (!(array_key_exists('class', $entity) && array_key_exists('properties', $entity))) {
-                continue;
-            }
-
-            $properties = array_merge(($this->entities[$entity['class']] ?? []), $entity['properties']);
-
-            $this->entities[$entity['class']] = $properties;
-        }
-
+        $this->entities = $this->cryptModel->getEntityPropertiesFromConfig();
     }
 
     /**
