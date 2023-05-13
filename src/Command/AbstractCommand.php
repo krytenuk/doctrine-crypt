@@ -4,7 +4,6 @@ namespace FwsDoctrineCrypt\Command;
 
 use Doctrine\Laminas\Hydrator\DoctrineObject;
 use Doctrine\ORM\EntityManagerInterface;
-use FwsDoctrineCrypt\Exception\DoctrineCryptException;
 use FwsDoctrineCrypt\Model\Crypt;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Formatter\OutputFormatterStyle;

@@ -2,7 +2,6 @@
 
 namespace FwsDoctrineCrypt\View\Helper;
 
-use FwsDoctrineCrypt\Exception\DoctrineCryptException;
 use FwsDoctrineCrypt\Model\Crypt;
 use Laminas\View\Helper\AbstractHelper;
 

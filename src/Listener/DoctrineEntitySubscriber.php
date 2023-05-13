@@ -12,7 +12,7 @@ use FwsDoctrineCrypt\Model\Crypt;
 
 class DoctrineEntitySubscriber implements EventSubscriber
 {
-    private array $entities = [];
+    private array $entities;
     private ?DoctrineObject $hydrator = null;
 
     /**
