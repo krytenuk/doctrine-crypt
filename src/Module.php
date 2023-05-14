@@ -59,10 +59,12 @@ class Module implements BootstrapListenerInterface
             /* @var $entityManager EntityManager */
             $entityManager = $cli->getHelperSet()->get('em')->getEntityManager();
             $crypt = $event->getParam('ServiceManager')->get(Crypt::class);
+            $config = $event->getParam('ServiceManager')->get('config');
             ConsoleRunner::addCommands($cli);
             $cli->addCommands([
                 new Command\EncryptCommand($entityManager, $crypt),
                 new Command\DecryptCommand($entityManager, $crypt),
+                new Command\ReEncryptCommand($entityManager, $config),
             ]);
         });
     }

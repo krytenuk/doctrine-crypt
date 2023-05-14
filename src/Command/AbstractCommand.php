@@ -22,6 +22,7 @@ abstract class AbstractCommand extends Command
 {
     const ENCRYPT = 'encrypt';
     const DECRYPT = 'decrypt';
+    const RE_ENCRYPT = 're-encrypt';
     const BATCH_SIZE = 20;
 
     protected InputInterface $input;
@@ -29,19 +30,19 @@ abstract class AbstractCommand extends Command
 
     protected DoctrineObject $hydrator;
     protected array $entities;
+    protected ?Crypt $reEncrypt = null;
 
     /**
      *
      * @param EntityManagerInterface $entityManager
-     * @param Crypt $crypt
+     * @param Crypt|null $crypt
      */
     public function __construct(
         protected EntityManagerInterface $entityManager,
-        protected Crypt $crypt
+        protected ?Crypt $crypt = null
     )
     {
         $this->hydrator = new DoctrineObject($this->entityManager);
-        $this->entities = $this->crypt->getEntityPropertiesFromConfig();
         parent::__construct();
     }
 
@@ -100,13 +101,16 @@ abstract class AbstractCommand extends Command
             return false;
         }
 
+        /** If not a dry run then output warning message */
         if (!$this->input->getOption('dry-run')) {
             $this->output->writeln([
                 '<warning>This will change the database records for the entities in your configuration</warning>',
                 '<warning>Please ensure you have a backup before continuing</warning>'
             ]);
-
-            /** @var QuestionHelper $helper */
+            /**
+             * Confirm action with user
+             * @var QuestionHelper $helper
+             */
             $helper = $this->getHelper('question');
             $question = new ConfirmationQuestion('Do you wish to continue?', false);
 
@@ -115,6 +119,7 @@ abstract class AbstractCommand extends Command
             }
         }
 
+        /** Loop through entities from config */
         foreach ($this->entities as $entityClass => $entityProperties) {
 
             if (!$entityProperties) {
@@ -158,14 +163,14 @@ abstract class AbstractCommand extends Command
                 }
 
                 if ((++$count % self::BATCH_SIZE) === 0) {
-                    if ($this->input->getOption('dry-run')) {
+                    if (!$this->input->getOption('dry-run')) {
                         $this->entityManager->flush();
                     }
                     $this->entityManager->clear();
                 }
             }
             if ($this->input->getOption('dry-run')) {
-                $this->output->writeln("<comment>Dry run, records not updated on database</comment>");
+                $this->output->writeln("<comment>Dry run, records not changed on database</comment>");
             } else {
                 $this->entityManager->flush();
             }
@@ -177,8 +182,23 @@ abstract class AbstractCommand extends Command
         return true;
     }
 
+    /**
+     * @param array $properties
+     * @param string $method
+     * @return array|null
+     */
     private function processProperties(array $properties, string $method): ?array
     {
+        $reEncrypt = false;
+        if ($method === self::RE_ENCRYPT) {
+            $reEncrypt = true;
+            $method = self::DECRYPT;
+        }
+        if ($reEncrypt && ($this->reEncrypt ?? null) === null) {
+            $this->output->writeln('<error>Re-encryption object not set</error>');
+            return null;
+        }
+
         if (!method_exists($this->crypt, $method)) {
             $this->output->writeln(sprintf('Method %s not found in %s', $method, $this->crypt::class));
             return null;
@@ -196,7 +216,7 @@ abstract class AbstractCommand extends Command
                 }
             }
             $processedValue = $this->crypt->$method((string) $value) ?? $value;
-            $returnProperties[$name] = $processedValue;
+            $returnProperties[$name] = ($reEncrypt ? ($this->reEncrypt->encrypt($processedValue) ?? $processedValue) : $processedValue);
         }
         return $returnProperties;
     }

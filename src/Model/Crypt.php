@@ -182,12 +182,12 @@ class Crypt
 
     /**
      * Check if value is encrypted
-     * @param $value
+     * @param string $value
      * @return bool
      */
-    public function isEncrypted($value): bool
+    public function isEncrypted(string $value): bool
     {
-        $decrypted = $this->decrypt((string) $value) ?? $value;
+        $decrypted = $this->decrypt($value) ?? $value;
         return $decrypted !== $value;
     }
 

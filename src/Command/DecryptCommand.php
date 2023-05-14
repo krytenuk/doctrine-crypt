@@ -38,6 +38,8 @@ class DecryptCommand extends AbstractCommand
     {
         $this->init($input, $output);
 
+        $this->entities = $this->crypt->getEntityPropertiesFromConfig();
+
         $output->writeln(sprintf('Decrypting database records using %s decryption', Crypt::$cryptNames[$this->crypt->getEncryptionMethod()]));
 
         $processed = $this->processEntities(self::DECRYPT);

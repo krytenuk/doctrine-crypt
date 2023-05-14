@@ -38,6 +38,8 @@ class EncryptCommand extends AbstractCommand
     {
         $this->init($input, $output);
 
+        $this->entities = $this->crypt->getEntityPropertiesFromConfig();
+
         $output->writeln(sprintf('Encrypting database records using %s encryption', Crypt::$cryptNames[$this->crypt->getEncryptionMethod()]));
 
         $processed = $this->processEntities(self::ENCRYPT);
