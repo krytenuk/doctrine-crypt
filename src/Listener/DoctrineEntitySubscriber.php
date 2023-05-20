@@ -43,7 +43,7 @@ class DoctrineEntitySubscriber implements EventSubscriber
     public function setHydrator(EntityManagerInterface $entityManager): void
     {
         if (!$this->hydrator) {
-           $this->hydrator = new DoctrineObject($entityManager);
+           $this->hydrator = new DoctrineObject($entityManager, false);
         }
     }
 
