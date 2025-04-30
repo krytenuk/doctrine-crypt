@@ -5,13 +5,14 @@
     "php": "^8.2",
     "symfony/console": "^5.4 || ^6.0",
     "doctrine/doctrine-orm-module": "^6.1.0",
-    "laminas/laminas-crypt": "^3.6",
     "laminas/laminas-eventmanager": "^3.4",
     "laminas/laminas-modulemanager": "^2.11",
     "laminas/laminas-stdlib": "^3.6",
     "laminas/laminas-hydrator": "^4.13",
     "ext-gettext": "*",
-    "ext-openssl": "*"
+    "ext-openssl": "*",
+    "paragonie/ciphersweet": "^4.7",
+    "laminas/laminas-cache": "^3.13"
   },
   "authors": [
     {

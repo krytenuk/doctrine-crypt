@@ -5,6 +5,9 @@ namespace FwsDoctrineCrypt\View\Helper;
 use FwsDoctrineCrypt\Model\Crypt;
 use Laminas\View\Helper\AbstractHelper;
 
+/**
+ * @deprecated
+ */
 class Decrypt extends AbstractHelper
 {
 

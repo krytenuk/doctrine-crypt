@@ -3,10 +3,10 @@
 namespace FwsDoctrineCrypt\View\Helper\Service;
 
 use FwsDoctrineCrypt\Model\Crypt;
+use FwsDoctrineCrypt\View\Helper\Decrypt;
 use Laminas\ServiceManager\Factory\FactoryInterface;
 use Psr\Container\ContainerExceptionInterface;
 use Psr\Container\ContainerInterface;
-use FwsDoctrineCrypt\View\Helper\Decrypt;
 use Psr\Container\NotFoundExceptionInterface;
 
 class DecryptFactory implements FactoryInterface

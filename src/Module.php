@@ -2,19 +2,26 @@
 
 namespace FwsDoctrineCrypt;
 
+use Doctrine\ORM\EntityManager;
 use Doctrine\ORM\Tools\Console\ConsoleRunner;
 use FwsDoctrineCrypt\Exception\DoctrineCryptException;
 use FwsDoctrineCrypt\Listener\DoctrineEntitySubscriber;
 use FwsDoctrineCrypt\Model\Crypt;
+use FwsDoctrineCrypt\Model\EntityAttributes;
 use Laminas\EventManager\EventInterface;
 use Laminas\ModuleManager\Feature\BootstrapListenerInterface;
 use Laminas\ModuleManager\ModuleManagerInterface;
-use FwsDoctrineCrypt\Command;
-use Doctrine\ORM\EntityManager;
+use Laminas\ServiceManager\AbstractFactory\ConfigAbstractFactory;
 use Symfony\Component\Console\Application as ConsoleApplication;
 
 class Module implements BootstrapListenerInterface
 {
+    protected ConfigProvider $configProvider;
+    public function __construct()
+    {
+        $this->configProvider = new ConfigProvider();
+    }
+
 
     /**
      *
@@ -24,25 +31,26 @@ class Module implements BootstrapListenerInterface
     public function onBootstrap(EventInterface $e): void
     {
         $serviceManager = $e->getApplication()->getServiceManager();
+        $entityManager = $serviceManager->get(EntityManager::class);
 
         /** Add doctrine subscriber if not cli command */
         if (!($_SERVER["argv"] ?? null)) {
-            $serviceManager
-                ->get(EntityManager::class)
+            $entityManager
                 ->getEventManager()
                 ->addEventSubscriber(new DoctrineEntitySubscriber(
-                    $serviceManager->get(Crypt::class)
+                    $serviceManager->get(Crypt::class),
+                    $entityManager
                 ));
         }
     }
 
-    /**
-     * 
-     * @return array
-     */
     public function getConfig(): array
     {
-        return include __DIR__ . '/../config/module.config.php';
+        return [
+            'service_manager' => $this->configProvider->getDependenciesConfig(),
+            'filters' => $this->configProvider->getFilterConfig(),
+            ConfigAbstractFactory::class => $this->configProvider->getConfigAbstractFactoryConfig(),
+        ];
     }
 
     /**
@@ -58,15 +66,15 @@ class Module implements BootstrapListenerInterface
             $cli = $event->getTarget();
             /* @var $entityManager EntityManager */
             $entityManager = $cli->getHelperSet()->get('em')->getEntityManager();
+            $entityAttributes = $event->getParam('ServiceManager')->get(EntityAttributes::class);
             $crypt = $event->getParam('ServiceManager')->get(Crypt::class);
             $config = $event->getParam('ServiceManager')->get('config');
             ConsoleRunner::addCommands($cli);
             $cli->addCommands([
-                new Command\EncryptCommand($entityManager, $crypt),
-                new Command\DecryptCommand($entityManager, $crypt),
-                new Command\ReEncryptCommand($entityManager, $config),
+                new Command\EncryptCommand($entityManager, $entityAttributes, $crypt),
+                new Command\DecryptCommand($entityManager, $entityAttributes, $crypt),
+                new Command\ReEncryptCommand($entityManager, $entityAttributes, $crypt, $config),
             ]);
         });
     }
-
 }

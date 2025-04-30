@@ -5,6 +5,7 @@ namespace FwsDoctrineCrypt\Command;
 use Doctrine\ORM\EntityManagerInterface;
 use FwsDoctrineCrypt\Exception\DoctrineCryptException;
 use FwsDoctrineCrypt\Model\Crypt;
+use FwsDoctrineCrypt\Model\EntityAttributes;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
@@ -15,10 +16,12 @@ class ReEncryptCommand extends AbstractCommand
 {
     public function __construct(
         EntityManagerInterface $entityManager,
+        EntityAttributes $entityAttributes,
+        Crypt $crypt,
         protected array $config
     )
     {
-        parent::__construct($entityManager);
+        parent::__construct($entityManager, $entityAttributes, $crypt);
     }
 
     /**
@@ -59,7 +62,7 @@ class ReEncryptCommand extends AbstractCommand
             Crypt::$cryptNames[$this->reEncrypt->getEncryptionMethod()])
         );
 
-        $processed = $this->processEntities(self::RE_ENCRYPT);
+        $processed = $this->processEntities();
         if ($processed) {
             $output->writeln('<info>Finished re-encrypting your entities.</info>');
             return Command::SUCCESS;

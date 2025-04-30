@@ -3,227 +3,387 @@
 namespace FwsDoctrineCrypt\Model;
 
 
+use Doctrine\DBAL\Types\Type;
+use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\EntityManager;
-use Exception;
-use Laminas\Crypt\BlockCipher;
-use Laminas\Crypt\PublicKey\Rsa;
 use FwsDoctrineCrypt\Exception\DoctrineCryptException;
+use Laminas\Cache\Exception\ExceptionInterface;
+use ParagonIE\CipherSweet\BlindIndex;
+use ParagonIE\CipherSweet\CipherSweet;
+use ParagonIE\CipherSweet\Contract\BackendInterface;
+use ParagonIE\CipherSweet\Contract\TransformationInterface;
+use ParagonIE\CipherSweet\EncryptedField;
+use ParagonIE\CipherSweet\EncryptedRow;
+use ParagonIE\CipherSweet\Exception\BlindIndexNameCollisionException;
+use ParagonIE\CipherSweet\Exception\CipherSweetException;
+use ParagonIE\CipherSweet\Exception\CryptoOperationException;
+use ParagonIE\CipherSweet\Exception\InvalidCiphertextException;
+use ParagonIE\CipherSweet\FastBlindIndex;
+use ParagonIE\CipherSweet\KeyProvider\StringProvider;
+use ParagonIE\CipherSweet\Transformation\LastFourDigits;
+use ReflectionAttribute;
+use ReflectionClass;
+use ReflectionException;
+use FwsDoctrineCrypt\Mapping\EncryptedField as MappedEncryptedField;
+use ReflectionProperty;
+use SodiumException;
 
 /**
  * Crypt class
  * Performs encryption/decryption of data
  *
  * @author Garry Childs <info@freedomwebservices.net>
+ *
  */
 class Crypt
 {
-    const CRYPT_BLOCK_CIPHER = 'block-cipher';
-    const CRYPT_RSA = 'rsa';
+    private CipherSweet|null $engine = null;
 
-    static array $allowedCrypts = [
-        self::CRYPT_BLOCK_CIPHER,
-        self::CRYPT_RSA,
-    ];
+    /**
+     * @var EncryptedRow[]
+     */
+    private array $encryptedRow = [];
 
-    static array $cryptNames = [
-        self::CRYPT_BLOCK_CIPHER => 'Block Cipher',
-        self::CRYPT_RSA => 'RSA Key Encryption',
-    ];
-
-    protected BlockCipher|Rsa $crypt;
-    protected ?string $encryptionMethod;
-    protected array $properties = [];
-    protected array $entities = [];
+    /**
+     * @var ReflectionClass[]
+     */
+    private array $reflectionEntity = [];
 
     /**
      *
      * @param EntityManager $entityManager
+     * @param EntityAttributes $entityAttributes
      * @param array $config
-     * @throws DoctrineCryptException
      */
     public function __construct(
-        protected EntityManager $entityManager,
-        protected array $config
+        protected EntityManager    $entityManager,
+        protected EntityAttributes $entityAttributes,
+        protected array            $config
     )
     {
-        /** Check if encryption method is set in config */
-        $this->encryptionMethod = $config['doctrineCrypt']['encryptionMethod'] ?? null;
-        if (!$this->encryptionMethod) {
-            throw new DoctrineCryptException('encryptionMethod is not set in config');
-        }
-
-        /** Check if entities set in config */
-        $entitiesConfig = $config['doctrineCrypt']['entities'] ?? null;
-        if ($entitiesConfig === null) {
-            throw new DoctrineCryptException('Doctrine crypt entities config not set');
-        }
-
-        switch ($this->encryptionMethod) {
-            case self::CRYPT_BLOCK_CIPHER:
-                $this->setBlockCipher($config);
-                break;
-            case self::CRYPT_RSA:
-                $this->setRsa($config);
-                break;
-            default: // invalid encryption method
-                throw new DoctrineCryptException(sprintf(
-                    'encryptionType %f is not a supported encryption method, expected one of %s',
-                    $this->encryptionMethod,
-                    implode(', ', self::$allowedCrypts)
-                ));
-        }
-
-        /** Store entities properties */
-        foreach ($entitiesConfig as $entity) {
-            if (!is_array($entity)) {
-                continue;
-            }
-
-            if (!(array_key_exists('class', $entity) && array_key_exists('properties', $entity))) {
-                continue;
-            }
-
-            $properties = array_merge(($this->entities[$entity['class']] ?? []), $entity['properties']);
-            $this->entities[$entity['class']] = $properties;
-            $this->properties = array_merge($this->properties, $entity['properties']);
-        }
-        $this->properties = array_unique($this->properties);
     }
 
     /**
-     * Set setup Block Cipher encryption
-     * @see https://docs.laminas.dev/laminas-crypt/public-key/#rsa
-     * @param array $config
-     * @return void
+     * Get the CipherSweet engine
      * @throws DoctrineCryptException
+     * @throws CryptoOperationException
      */
-    private function setBlockCipher(array $config): void
+    public function getEngine(): CipherSweet
     {
-        $key = $config['doctrineCrypt']['encryptionKey'] ?? null;
+        if ($this->engine) {
+            return $this->engine;
+        }
+
+        $config = $this->config['doctrine-crypt']['cipherSweet'] ?? null;
+        if (!$config) {
+            throw new DoctrineCryptException('cipherSweet configuration is not set');
+        }
+
+        $engine = $this->config['engine'] ?? null;
+        if ($engine) {
+            if (!class_implements($engine, BackendInterface::class)) {
+                throw new DoctrineCryptException(sprintf('Class %s is not a valid CipherSweet engine', $engine));
+            }
+
+            $engine = new $engine();
+        }
+
+        $key = (string)($config['encryptionKey'] ?? '');
         if (!$key) {
-            throw new DoctrineCryptException('encryptionKey key not set in config');
+            throw new DoctrineCryptException('encryptionKey config key is not set');
         }
 
-        /** Set and configure BlockCipher encryption */
-        $this->crypt = BlockCipher::factory('openssl', ['algo' => 'aes']);
-        $this->crypt->setKey($key);
+        $this->engine = new CipherSweet(new StringProvider($key), $engine);
+
+        return $this->engine;
     }
 
     /**
-     * Set setup RSA encryption
-     * @see https://docs.laminas.dev/laminas-crypt/public-key/#rsa
-     * @param array $config
-     * @return void
+     * Decrypt all property values in the given entity using the entities FWS Doctrine Crypt attributes
+     * @throws CryptoOperationException
+     * @throws CipherSweetException
      * @throws DoctrineCryptException
+     * @throws ReflectionException
+     * @throws SodiumException
      */
-    private function setRsa(array $config): void
+    public function decrypt(object $entity): object
     {
-        $publicKeyFile = (string) $config['doctrineCrypt']['rsaPublicKeyFile'] ?? null;
-        if (!$publicKeyFile) {
-            throw new DoctrineCryptException('rsaPublicKeyFile key not set in config');
+        $values = $this->prepEntity($entity, __FUNCTION__);
+        if ($values === null) {
+            return $entity;
         }
 
-        $privateKeyFile = (string) $config['doctrineCrypt']['rsaPrivateKeyFile'] ?? null;
-        if (!$privateKeyFile) {
-            throw new DoctrineCryptException('rsaPrivateKeyFile key not set in config');
-        }
-
-        $passphrase = (string) $config['doctrineCrypt']['rsaKeyPassphrase'] ?? null;
-        if (!$passphrase) {
-            throw new DoctrineCryptException('rsaKeyPassphrase key not set in config');
-        }
-
-        /** Set and configure RSA encryption */
-        $this->crypt = Rsa::factory([
-            'public_key' => $publicKeyFile,
-            'private_key' => $privateKeyFile,
-            'pass_phrase' => $passphrase,
-            'binary_output' => false,
-        ]);
-    }
-
-    /**
-     * Get entities and their properties to process
-     * @return array
-     */
-    public function getEntityPropertiesFromConfig(): array
-    {
-        return $this->entities;
-    }
-
-    /**
-     * Encrypt and return value, null on failure
-     * @param string $value
-     * @return string|null
-     */
-    public function encrypt(string $value): ?string
-    {
         try {
-            return $this->crypt->encrypt($value);
-        } catch (Exception) {
-            return $value;
+            $decrypted = $this->encryptedRow[$entity::class]->decryptRow($values);
+        } catch (InvalidCiphertextException) {
+            $decrypted = $values;
         }
+
+        foreach ($decrypted as $propertyName => $value) {
+            $this->reflectionEntity[$entity::class]->getProperty($propertyName)->setValue($entity, $value);
+        }
+
+        return $entity;
     }
 
     /**
-     * Decrypt and return value, null on failure
-     * @param string $value
-     * @return string|null
+     * @throws CipherSweetException
+     * @throws CryptoOperationException
+     * @throws ReflectionException|DoctrineCryptException
+     * @throws SodiumException
      */
-    public function decrypt(string $value): ?string
+    public function encrypt(object $entity): object
     {
-        try {
-            return $this->crypt->decrypt($value) ?: null;
-        } catch (Exception) {
+        $values = $this->prepEntity($entity, __FUNCTION__);
+        if ($values === null) {
+            return $entity;
+        }
+
+        if (empty($values)) {
+            throw new DoctrineCryptException("Entity record is already encrypted");
+        }
+
+        $encryptedRow = $this->encryptedRow[$entity::class];
+
+        $encrypted = $encryptedRow->prepareRowForStorage($values);
+
+        if (count($encrypted) !== 2) {
+            return $entity;
+        }
+
+        foreach (($encrypted[0] ?? []) as $propertyName => $value) {
+            $this->reflectionEntity[$entity::class]->getProperty($propertyName)->setValue($entity, $value);
+        }
+
+        foreach (($encrypted[1] ?? []) as $indexProperty => $encryptedIndex) {
+            $this->reflectionEntity[$entity::class]->getProperty($indexProperty)->setValue($entity, $encryptedIndex);
+        }
+
+        return $entity;
+    }
+
+    /**
+     * @throws DoctrineCryptException
+     * @throws CryptoOperationException
+     */
+    protected function prepEntity(object $entity, string $method): ?array
+    {
+        $attributes = $this->getAttributes($entity::class);
+        if (!$attributes) {
             return null;
         }
-        
-    }
 
-    /**
-     * Check if value is encrypted
-     * @param string $value
-     * @return bool
-     */
-    public function isEncrypted(string $value): bool
-    {
-        $decrypted = $this->decrypt($value) ?? $value;
-        return $decrypted !== $value;
-    }
+        $entityMetadata = $this->entityManager->getClassMetadata($entity::class);
 
-    /**
-     * Decrypt an array returned from Doctrine with AbstractQuery::HYDRATE_ARRAY hydration
-     * @param array $array
-     * @return array
-     */
-    public function decryptArray(array $array): array
-    {
-        foreach ($array as $key => $value) {
-            if (is_array($value)) {
-                $array[$key] = $this->decryptArray($value);
-                continue;
-            }
+        $this->reflectionEntity[$entity::class] = new ReflectionClass($entity);
+        $entityProperties = $this->reflectionEntity[$entity::class]->getProperties();
 
-            if (!is_scalar($value) || is_bool($value) || !$value) {
-                continue;
-            }
-
-            if (!in_array($key, $this->properties)) {
-                continue;
-            }
-
-            $array[$key] = $this->decrypt((string) $value) ?? $value;
+        if (!array_key_exists($entity::class, $this->encryptedRow)) {
+            $this->encryptedRow[$entity::class] = new EncryptedRow($this->getEngine(), $this->entityManager->getClassMetadata($entity::class)->getName());
         }
-        return $array;
+
+        $magicHeader = $this->encryptedRow[$entity::class]->getBackend()->getPrefix();
+
+        $values = [];
+        foreach ($entityProperties as $reflectionProperty) {
+            if (!array_key_exists($reflectionProperty->getName(), $attributes)) {
+                continue;
+            }
+
+            $reflectionPropertyName = $reflectionProperty->getName();
+            $reflectionPropertyValue = $reflectionProperty->getValue($entity);
+
+            /**
+             * Check if value is already encrypted
+             */
+            if (str_starts_with($reflectionPropertyValue, $magicHeader) && $method === 'encrypt') {
+                continue;
+            }
+
+            $propertyMetadata = $entityMetadata->fieldMappings[$reflectionPropertyName] ?? null;
+            if ($propertyMetadata === null) {
+                continue;
+            }
+
+            $this->addFields(
+                $this->encryptedRow[$entity::class],
+                $reflectionPropertyName,
+                $propertyMetadata['type'] ?? null
+            );
+
+            $this->addIndexes(
+                $this->encryptedRow[$entity::class],
+                $entity::class,
+                $reflectionPropertyName,
+                $attributes,
+            );
+
+            $values[$reflectionPropertyName] = $reflectionPropertyValue;
+        }
+
+        return $values;
+    }
+
+    protected function getAttributes(string $entityClassName): array|null
+    {
+        try {
+            return $this->entityAttributes->getAttributes($entityClassName);
+        } catch (DoctrineCryptException|ReflectionException) {
+            return null;
+        }
     }
 
     /**
-     * Returns the encryption method being used
-     * @see self::$allowedCrypts
-     * @return string
+     * Add the EncryptedRow objects fields for the specified property name and type
      */
-    public function getEncryptionMethod(): string
+    protected function addFields(
+        EncryptedRow $encryptedRow,
+        string       $propertyName,
+        ?string      $propertyType
+    ): EncryptedRow
     {
-        return $this->encryptionMethod;
+        if ($propertyType === null) {
+            return $encryptedRow;
+        }
+
+        if (Type::hasType($propertyType) === false) {
+            return $encryptedRow;
+        }
+
+        switch ($propertyType) {
+            case Types::SMALLINT:
+            case Types::BIGINT:
+            case Types::INTEGER:
+                $encryptedRow->addIntegerField($propertyName);
+                break;
+            case Types::DECIMAL:
+            case Types::FLOAT:
+                $encryptedRow->addFloatField($propertyName);
+                break;
+            case Types::STRING:
+            case Types::ASCII_STRING:
+            case Types::TEXT:
+            case Types::GUID:
+            case Types::BINARY:
+            case Types::BLOB:
+                $encryptedRow->addTextField($propertyName);
+                break;
+            case Types::BOOLEAN:
+                $encryptedRow->addBooleanField($propertyName);
+                break;
+        }
+
+        return $encryptedRow;
+    }
+
+    /**
+     * Add indexes to EncryptedRow object using the entity classes #[FWS\IndexableField()] attributes for the specified property name
+     * @throws DoctrineCryptException
+     */
+    protected function addIndexes(
+        EncryptedRow $encryptedField,
+        string       $entityClassName,
+        string       $propertyName,
+        array        $attributes,
+    ): void
+    {
+        if (!array_key_exists($propertyName, $attributes)) {
+            return;
+        }
+
+        /** @var MappedEncryptedField|null $encryptedFieldAttribute */
+        $encryptedFieldAttribute = $attributes[$propertyName] ?? null;
+        if ($encryptedFieldAttribute === null) {
+            return;
+        }
+
+        if ($encryptedFieldAttribute->isIndexable()) {
+            $indexes = $encryptedFieldAttribute->getIndexes();
+            foreach ($indexes as $indexAttribute) {
+                if ($indexAttribute->getProperty() === null) {
+                    throw new DoctrineCryptException(
+                        sprintf('Index property not found in %s::%s', $entityClassName, $propertyName));
+                }
+                $encryptedField->addBlindIndex(
+                    $propertyName,
+                    new BlindIndex(
+                        $indexAttribute->getProperty(),
+                        $this->instantiateTransformationClasses($indexAttribute->getTransformationClasses()),
+                        $indexAttribute->getFilterBits(),
+                        $indexAttribute->useFastHash()
+                    )
+                );
+            }
+        }
+    }
+
+    /**
+     * Return FWS Doctrine crypt index for specified entity class name and property
+     * If property is omitted all class indexes are returned
+     * @throws CryptoOperationException
+     * @throws CipherSweetException
+     * @throws DoctrineCryptException|SodiumException
+     */
+    public function getIndex(
+        string  $entityClassName,
+        string  $propertyName,
+        mixed   $value,
+        ?string $indexName,
+    ): mixed
+    {
+        $entityMetadata = $this->entityManager->getClassMetadata($entityClassName);
+        $propertyMetadata = $entityMetadata->fieldMappings[$propertyName] ?? null;
+
+        if ($propertyMetadata === null) {
+            return $value;
+        }
+
+        $attributes = $this->getAttributes($entityClassName);
+        if (!$attributes) {
+            return $value;
+        }
+
+        $encryptedRow = new EncryptedRow($this->getEngine(), $entityClassName);
+
+        $this->addFields(
+            $encryptedRow,
+            $propertyName,
+            $propertyMetadata['type'] ?? null
+        );
+
+        $this->addIndexes(
+            $encryptedRow,
+            $entityClassName,
+            $propertyName,
+            $attributes
+        );
+
+        if ($indexName) {
+            return $encryptedRow->getBlindIndex($indexName, [$propertyName => $value]);
+        }
+
+        return $encryptedRow->getAllBlindIndexes([$propertyName => $value]);
+    }
+
+    /**
+     * @param string[] $transformationClasses
+     * @return TransformationInterface[]
+     */
+    protected function instantiateTransformationClasses(array $transformationClasses): array
+    {
+        $transformationObjects = [];
+        foreach ($transformationClasses as $transformationClass) {
+            if (!class_exists($transformationClass)) {
+                continue;
+            }
+
+            if (!is_a($transformationClass, TransformationInterface::class, true)) {
+                continue;
+            }
+
+            $transformationObjects[] = new $transformationClass();
+        }
+
+        return $transformationObjects;
     }
 }

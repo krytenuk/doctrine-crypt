@@ -4,13 +4,23 @@ namespace FwsDoctrineCrypt\Command;
 
 use Doctrine\Laminas\Hydrator\DoctrineObject;
 use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\EntityRepository;
+use Doctrine\ORM\NonUniqueResultException;
+use Doctrine\ORM\NoResultException;
+use Exception;
+use FwsDoctrineCrypt\Exception\DoctrineCryptException;
 use FwsDoctrineCrypt\Model\Crypt;
+use FwsDoctrineCrypt\Model\EntityAttributes;
+use ParagonIE\CipherSweet\Exception\CipherSweetException;
+use ParagonIE\CipherSweet\Exception\CryptoOperationException;
+use ReflectionException;
+use SodiumException;
 use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Cursor;
 use Symfony\Component\Console\Formatter\OutputFormatterStyle;
 use Symfony\Component\Console\Helper\QuestionHelper;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
-use Doctrine\ORM\EntityRepository;
 use Symfony\Component\Console\Question\ConfirmationQuestion;
 
 /**
@@ -35,11 +45,13 @@ abstract class AbstractCommand extends Command
     /**
      *
      * @param EntityManagerInterface $entityManager
-     * @param Crypt|null $crypt
+     * @param EntityAttributes $entityAttributes
+     * @param Crypt $crypt
      */
     public function __construct(
         protected EntityManagerInterface $entityManager,
-        protected ?Crypt $crypt = null
+        protected EntityAttributes $entityAttributes,
+        protected Crypt $crypt
     )
     {
         $this->hydrator = new DoctrineObject($this->entityManager);
@@ -59,18 +71,6 @@ abstract class AbstractCommand extends Command
 
         $outputStyle = new OutputFormatterStyle('red', null, ['bold']);
         $output->getFormatter()->setStyle('warning', $outputStyle);
-    }
-
-    /**
-     * Write to console if in verbose mode (-v, -vv or -vvv)
-     * @param array|string $message
-     * @return void
-     */
-    protected function verboseOutput(array|string $message): void
-    {
-        if ($this->input->getOption('verbose')) {
-            $this->output->writeln($message);
-        }
     }
 
     /**
@@ -95,14 +95,15 @@ abstract class AbstractCommand extends Command
      */
     protected function processEntities(string $method): bool
     {
-        /** Get entities to process */
-        if (!$this->entities) {
-            $this->output->writeln('<error>No entities found in config</error>');
-            return false;
-        }
+        /**
+         * @var string[] $entitiesClassNames
+         */
+        $entitiesClassNames = $this->entityManager->getConfiguration()->getMetadataDriverImpl()->getAllClassNames();
 
-        /** If not a dry run then output warning message */
-        if (!$this->input->getOption('dry-run')) {
+        $dryRun = $this->input->getOption('dry-run');
+        if ($dryRun) {
+            $this->output->writeln('Dry run option set, no records will be changed');
+        } else {
             $this->output->writeln([
                 '<warning>This will change the database records for the entities in your configuration</warning>',
                 '<warning>Please ensure you have a backup before continuing</warning>'
@@ -119,67 +120,95 @@ abstract class AbstractCommand extends Command
             }
         }
 
-        /** Loop through entities from config */
-        foreach ($this->entities as $entityClass => $entityProperties) {
+        $cursor = new Cursor($this->output);
+        /**
+         * Loop through entities from config
+         */
+        foreach ($entitiesClassNames as $entityClassName) {
 
-            if (!$entityProperties) {
-                $this->output->writeln("<error>No properties specified for entity $entityClass in config</error>");
+            /** Get doctrine crypt attributes for entity */
+            $attributes = $this->getAttributes($entityClassName);
+            if (!$attributes) {
+                $this->output->writeln("<info>No crypt attributes found for $entityClassName</info>");
                 continue;
             }
 
-            $repository = $this->getRepository($entityClass);
+            $repository = $this->getRepository($entityClassName);
             if ($repository === null) {
-                $this->output->writeln("<error>Entity repository for $entityClass not found.</error>");
+                $this->output->writeln("<error>Entity repository for $entityClassName not found.</error>");
                 continue;
             }
 
-            $this->output->writeln("Processing entity $entityClass");
+            $this->output->writeln("Processing entity $entityClassName");
             /** Create Doctrine query to retrieve records for entity class */
             $queryBuilder = $this->entityManager->createQueryBuilder();
-            $query = $queryBuilder->select('t')
-                ->from($entityClass, 't')
+            try {
+                $total = $queryBuilder
+                    ->select($queryBuilder->expr()->count('c'))
+                    ->from($entityClassName, 'c')
+                    ->getQuery()
+                    ->getSingleScalarResult();
+            } catch (NoResultException) {
+                $this->output->write("No records found for entity $entityClassName");
+                continue;
+            } catch (NonUniqueResultException) {
+                continue;
+            }
+
+            $query = ($this->entityManager->createQueryBuilder())
+                ->select('t')
+                ->from($entityClassName, 't')
                 ->getQuery();
 
-            $total = 0;
             $count = 1;
             /**
              * Process in batches through iterator to avoid memory allocation errors when processing large datasets
              * @see https://www.doctrine-project.org/projects/doctrine-orm/en/2.14/reference/batch-processing.html#iterating-results
              */
             foreach ($query->toIterable() as $entity) {
-                $properties = $this->getProperties($entity, $entityProperties);
-                if (!$properties) {
-                    $this->verboseOutput('No properties found for entity');
+                try {
+                    $this->crypt->$method($entity);
+                    $cursor->clearLine()->moveToColumn(0);
+                    $this->output->write("Processing entity $entityClassName ($count of $total)");
+                } catch (Exception $e) {
+                    $message = $e->getMessage();
+                    $cursor->clearLine()->moveToColumn(0);
+                    $this->output->writeln("<error>Encryption failed: $message</error>");
+                    $count++;
                     continue;
-                }
-                $toHydrate = $this->processProperties($properties, $method);
-                if (!$toHydrate) {
-                    $this->verboseOutput('No properties to update in entity');
-                    continue;
-                }
-                $total++;
-                if (!$this->input->getOption('dry-run')) {
-                    $this->hydrator->hydrate($toHydrate, $entity);
                 }
 
-                if ((++$count % self::BATCH_SIZE) === 0) {
-                    if (!$this->input->getOption('dry-run')) {
+                if (($count++ % self::BATCH_SIZE) === 0) {
+                    /** Not dry run, save entity batch */
+                    if (!$dryRun) {
                         $this->entityManager->flush();
                     }
                     $this->entityManager->clear();
                 }
             }
-            if ($this->input->getOption('dry-run')) {
-                $this->output->writeln("<comment>Dry run, records not changed on database</comment>");
-            } else {
+
+            /** Not dry run, save final entities */
+            if (!$dryRun) {
                 $this->entityManager->flush();
             }
-            $this->entityManager->clear();
 
-            $this->output->writeln("<info>Processed $total records for entity class $entityClass</info>");
+            $this->output->writeln(PHP_EOL . "<info>Processed $total records for entity class $entityClassName</info>");
         }
 
         return true;
+    }
+
+    protected function getAttributes(string $entityName): ?array
+    {
+        if (!class_exists($entityName)) {
+            return null;
+        }
+
+        try {
+            return $this->entityAttributes->getAttributes($entityName);
+        } catch (DoctrineCryptException|ReflectionException) {
+            return null;
+        }
     }
 
     /**

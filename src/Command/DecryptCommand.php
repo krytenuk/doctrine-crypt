@@ -2,11 +2,10 @@
 
 namespace FwsDoctrineCrypt\Command;
 
-use FwsDoctrineCrypt\Model\Crypt;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
-use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Input\InputOption;
+use Symfony\Component\Console\Output\OutputInterface;
 
 /**
  * Description of EncryptEntityCommand
@@ -38,17 +37,18 @@ class DecryptCommand extends AbstractCommand
     {
         $this->init($input, $output);
 
-        $this->entities = $this->crypt->getEntityPropertiesFromConfig();
+        $output->writeln('Decrypting database records');
 
-        $output->writeln(sprintf('Decrypting database records using %s decryption', Crypt::$cryptNames[$this->crypt->getEncryptionMethod()]));
-
-        $processed = $this->processEntities(self::DECRYPT);
+        $processed = $this->processEntities('decrypt');
         if ($processed) {
             $output->writeln('<info>Finished decrypting your entities.</info>');
+            if ($this->input->getOption('dry-run')) {
+                $this->output->writeln('Dry run option set, no records were changed');
+            }
             return Command::SUCCESS;
         }
 
-        $output->writeln('<info>There was a problem decrypting your entities.</info>');
+        $output->writeln('<error>There was a problem decrypting your entities.</error>');
         return Command::FAILURE;
     }
 }
