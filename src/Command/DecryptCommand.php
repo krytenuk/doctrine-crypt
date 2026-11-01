@@ -39,7 +39,7 @@ class DecryptCommand extends AbstractCommand
 
         $output->writeln('Decrypting database records');
 
-        $processed = $this->processEntities('decrypt');
+        $processed = $this->processEntities('decryptEncrypted');
         if ($processed) {
             $output->writeln('<info>Finished decrypting your entities.</info>');
             if ($this->input->getOption('dry-run')) {

@@ -2,19 +2,15 @@
 
 namespace FwsDoctrineCrypt\Command;
 
-use Doctrine\Laminas\Hydrator\DoctrineObject;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\EntityRepository;
 use Doctrine\ORM\NonUniqueResultException;
 use Doctrine\ORM\NoResultException;
-use Exception;
 use FwsDoctrineCrypt\Exception\DoctrineCryptException;
+use FwsDoctrineCrypt\Listener\DoctrineEntitySubscriber;
 use FwsDoctrineCrypt\Model\Crypt;
 use FwsDoctrineCrypt\Model\EntityAttributes;
-use ParagonIE\CipherSweet\Exception\CipherSweetException;
-use ParagonIE\CipherSweet\Exception\CryptoOperationException;
 use ReflectionException;
-use SodiumException;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Cursor;
 use Symfony\Component\Console\Formatter\OutputFormatterStyle;
@@ -22,6 +18,7 @@ use Symfony\Component\Console\Helper\QuestionHelper;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Question\ConfirmationQuestion;
+use Throwable;
 
 /**
  * AbstractCommand
@@ -38,7 +35,6 @@ abstract class AbstractCommand extends Command
     protected InputInterface $input;
     protected OutputInterface $output;
 
-    protected DoctrineObject $hydrator;
     protected array $entities;
     protected ?Crypt $reEncrypt = null;
 
@@ -54,7 +50,6 @@ abstract class AbstractCommand extends Command
         protected Crypt $crypt
     )
     {
-        $this->hydrator = new DoctrineObject($this->entityManager);
         parent::__construct();
     }
 
@@ -89,16 +84,31 @@ abstract class AbstractCommand extends Command
         return null;
     }
 
+    /**
+     * The commands read the stored values and write them straight back, so the subscriber must not
+     * decrypt or encrypt anything on the way through.
+     */
+    private function detachSubscriber(): void
+    {
+        $eventManager = $this->entityManager->getEventManager();
+        foreach ($eventManager->getAllListeners() as $event => $listeners) {
+            foreach ($listeners as $listener) {
+                if ($listener instanceof DoctrineEntitySubscriber) {
+                    $eventManager->removeEventListener($event, $listener);
+                }
+            }
+        }
+    }
+
     /** Process entity encryption/decryption
      * @param string $method
-     * @return bool
+     * @return bool Whether every record was processed without an error
      */
     protected function processEntities(string $method): bool
     {
-        /**
-         * @var string[] $entitiesClassNames
-         */
-        $entitiesClassNames = $this->entityManager->getConfiguration()->getMetadataDriverImpl()->getAllClassNames();
+        $this->detachSubscriber();
+
+        $failures = 0;
 
         $dryRun = $this->input->getOption('dry-run');
         if ($dryRun) {
@@ -124,10 +134,22 @@ abstract class AbstractCommand extends Command
         /**
          * Loop through entities from config
          */
-        foreach ($entitiesClassNames as $entityClassName) {
+        foreach ($this->entityManager->getMetadataFactory()->getAllMetadata() as $metadata) {
+            if ($metadata->isMappedSuperclass || $metadata->isEmbeddedClass) {
+                continue;
+            }
+
+            $entityClassName = $metadata->getName();
 
             /** Get doctrine crypt attributes for entity */
-            $attributes = $this->getAttributes($entityClassName);
+            try {
+                $attributes = $this->entityAttributes->getAttributes($entityClassName);
+            } catch (DoctrineCryptException|ReflectionException $e) {
+                $this->output->writeln("<error>Invalid crypt attributes for $entityClassName: {$e->getMessage()}</error>");
+                $failures++;
+                continue;
+            }
+
             if (!$attributes) {
                 $this->output->writeln("<info>No crypt attributes found for $entityClassName</info>");
                 continue;
@@ -170,10 +192,11 @@ abstract class AbstractCommand extends Command
                     $this->crypt->$method($entity);
                     $cursor->clearLine()->moveToColumn(0);
                     $this->output->write("Processing entity $entityClassName ($count of $total)");
-                } catch (Exception $e) {
+                } catch (Throwable $e) {
                     $message = $e->getMessage();
                     $cursor->clearLine()->moveToColumn(0);
-                    $this->output->writeln("<error>Encryption failed: $message</error>");
+                    $this->output->writeln("<error>Failed to process record $count: $message</error>");
+                    $failures++;
                     $count++;
                     continue;
                 }
@@ -195,78 +218,6 @@ abstract class AbstractCommand extends Command
             $this->output->writeln(PHP_EOL . "<info>Processed $total records for entity class $entityClassName</info>");
         }
 
-        return true;
+        return $failures === 0;
     }
-
-    protected function getAttributes(string $entityName): ?array
-    {
-        if (!class_exists($entityName)) {
-            return null;
-        }
-
-        try {
-            return $this->entityAttributes->getAttributes($entityName);
-        } catch (DoctrineCryptException|ReflectionException) {
-            return null;
-        }
-    }
-
-    /**
-     * @param array $properties
-     * @param string $method
-     * @return array|null
-     */
-    private function processProperties(array $properties, string $method): ?array
-    {
-        $reEncrypt = false;
-        if ($method === self::RE_ENCRYPT) {
-            $reEncrypt = true;
-            $method = self::DECRYPT;
-        }
-        if ($reEncrypt && ($this->reEncrypt ?? null) === null) {
-            $this->output->writeln('<error>Re-encryption object not set</error>');
-            return null;
-        }
-
-        if (!method_exists($this->crypt, $method)) {
-            $this->output->writeln(sprintf('Method %s not found in %s', $method, $this->crypt::class));
-            return null;
-        }
-
-        $returnProperties = [];
-        foreach ($properties as $name => $value) {
-            if (!$value) {
-                $returnProperties[$name] = $value;
-                continue;
-            }
-            if ($method === self::ENCRYPT) {
-                if ($this->crypt->isEncrypted($value)) {
-                    continue;
-                }
-            }
-            $processedValue = $this->crypt->$method((string) $value) ?? $value;
-            $returnProperties[$name] = ($reEncrypt ? ($this->reEncrypt->encrypt($processedValue) ?? $processedValue) : $processedValue);
-        }
-        return $returnProperties;
-    }
-
-    private function getProperties(object $entity, array $properties): array
-    {
-        $returnProperties = [];
-
-        $entityProperties = $this->hydrator->extract($entity);
-        if (!$entityProperties) {
-            return $returnProperties;
-        }
-
-        foreach ($properties as $propertyName) {
-            if (!array_key_exists($propertyName, $entityProperties)) {
-                continue;
-            }
-            $returnProperties[$propertyName] = $entityProperties[$propertyName];
-        }
-
-        return $returnProperties;
-    }
-
 }

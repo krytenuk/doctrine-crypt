@@ -2,12 +2,9 @@
 
 namespace FwsDoctrineCrypt\Filter;
 
-use Exception;
 use FwsDoctrineCrypt\Exception\DoctrineCryptException;
 use FwsDoctrineCrypt\Model\Crypt;
 use Laminas\Filter\FilterInterface;
-use ParagonIE\CipherSweet\Exception\CipherSweetException;
-use ParagonIE\CipherSweet\Exception\CryptoOperationException;
 
 final class CryptIndex implements FilterInterface
 {
@@ -49,11 +46,7 @@ final class CryptIndex implements FilterInterface
      */
     public function filter($value): ?string
     {
-        try {
-            $index = $this->crypt->getIndex($this->entityClassName, $this->property, $value, $this->filterName);
-        } catch (Exception $exception) {
-            return null;
-        }
+        $index = $this->crypt->getIndex($this->entityClassName, $this->property, $value, $this->filterName);
 
         if (is_string($index)) {
             return $index;

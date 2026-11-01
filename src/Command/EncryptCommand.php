@@ -39,7 +39,7 @@ class EncryptCommand extends AbstractCommand
 
         $output->writeln('Encrypting database records');
 
-        $processed = $this->processEntities('encrypt');
+        $processed = $this->processEntities('encryptPlaintext');
         if ($processed) {
             $output->writeln('<info>Finished encrypting your entities.</info>');
             if ($this->input->getOption('dry-run')) {

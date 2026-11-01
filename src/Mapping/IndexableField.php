@@ -4,7 +4,7 @@ namespace FwsDoctrineCrypt\Mapping;
 
 use Attribute;
 
-#[Attribute(Attribute::TARGET_PROPERTY)]
+#[Attribute(Attribute::TARGET_PROPERTY | Attribute::IS_REPEATABLE)]
 class IndexableField
 {
 

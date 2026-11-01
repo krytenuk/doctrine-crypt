@@ -1,6 +1,5 @@
 <?php
 
-use YourModule\Entity\YourEntity;
 use ParagonIE\CipherSweet\Backend;
 
 return [
@@ -8,9 +7,10 @@ return [
         'cipherSweet' => [
             'engine' => Backend\BoringCrypto::class, // <- Ciphersweet engine to use
                         // ParagonIE\CipherSweet\Backend\BoringCrypto or ParagonIE\CipherSweet\Backend\FIPSCrypto
-            'encryptionKey' => 'your_encryption_key', // <- use a raw binary string, hex-encoded string, or base64url-encoded string
-                        // you can use Hex::encode(random_bytes(32)) to generate a random key
+            'encryptionKey' => 'your_encryption_key', // <- 32 raw bytes, 64 hex characters or 44 base64url characters
+                        // you can use ParagonIE\ConstantTime\Hex::encode(random_bytes(32)) to generate a random key
         ],
-        'cache_dir' => '/tmp/cache', // <- Your application cache directory
+        // Optional. The container name of the entity manager, if not Doctrine\ORM\EntityManagerInterface
+        // 'entity_manager' => 'doctrine.entity_manager.orm_default',
     ],
 ];

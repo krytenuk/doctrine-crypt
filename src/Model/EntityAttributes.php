@@ -2,16 +2,15 @@
 
 namespace FwsDoctrineCrypt\Model;
 
-use FwsDoctrineCrypt\Cache\AttributeCachedItem;
 use FwsDoctrineCrypt\Exception\DoctrineCryptException;
 use FwsDoctrineCrypt\Mapping\EncryptedField;
 use FwsDoctrineCrypt\Mapping\IndexableField;
-use Laminas\Cache\Exception\ExceptionInterface;
-use Laminas\Cache\Storage\Adapter\Filesystem;
-use Laminas\Validator\File\Hash;
 use ReflectionClass;
 use ReflectionException;
+use ReflectionNamedType;
 use ReflectionProperty;
+use ReflectionType;
+use ReflectionUnionType;
 
 class EntityAttributes
 {
@@ -20,34 +19,22 @@ class EntityAttributes
      */
     private array $attributes = [];
 
-    public function __construct(protected Filesystem $cache)
-    {
-    }
-
-
     /**
-     * Return an array of properties and values that are to be encrypted/Decrypted
+     * Return the encrypted field attributes of an entity class, keyed by property name
      * @param string $entityClassName
-     * @return array|null
+     * @return EncryptedField[]
      * @throws DoctrineCryptException
      * @throws ReflectionException
      */
-    public function getAttributes(string $entityClassName): ?array
+    public function getAttributes(string $entityClassName): array
     {
         if (array_key_exists($entityClassName, $this->attributes)) {
             return $this->attributes[$entityClassName];
         }
 
-        $attributes = $this->readFromCache($entityClassName);
-        if ($attributes !== null) {
-            $this->attributes[$entityClassName] = $attributes;
-            return $attributes;
-        }
-
         $reflectionEntity = new ReflectionClass($entityClassName);
         $attributes = [];
-        $properties = $reflectionEntity->getProperties();
-        foreach ($properties as $property) {
+        foreach ($this->getProperties($reflectionEntity) as $property) {
             $encryptedFields = $property->getAttributes(EncryptedField::class);
             if (empty($encryptedFields)) {
                 continue;
@@ -56,6 +43,14 @@ class EntityAttributes
             if (count($encryptedFields) > 1) {
                 throw new DoctrineCryptException(sprintf(
                     'Entity property %s has more than one encrypted field attribute',
+                    $entityClassName . '::' . $property->getName()
+                ));
+            }
+
+            if (!$this->acceptsString($property->getType())) {
+                throw new DoctrineCryptException(sprintf(
+                    'Entity property %s has an encrypted field attribute but its type does not accept a string, '
+                    . 'which Doctrine needs to assign the ciphertext to it',
                     $entityClassName . '::' . $property->getName()
                 ));
             }
@@ -71,16 +66,51 @@ class EntityAttributes
             $attributes[$property->getName()] = $encryptedField;
         }
 
-        $this->cacheAttributes($entityClassName, $reflectionEntity->getFileName(), $attributes);
+        return $this->attributes[$entityClassName] = $attributes;
+    }
 
-        return $attributes;
+    /**
+     * All properties of a class including the private properties of its parents,
+     * which ReflectionClass::getProperties() leaves out.
+     * @return array<string, ReflectionProperty>
+     */
+    protected function getProperties(ReflectionClass $class): array
+    {
+        $properties = [];
+        do {
+            foreach ($class->getProperties() as $property) {
+                $properties[$property->getName()] ??= $property;
+            }
+        } while ($class = $class->getParentClass());
+
+        return $properties;
+    }
+
+    protected function acceptsString(?ReflectionType $type): bool
+    {
+        if ($type === null) {
+            return true;
+        }
+
+        if ($type instanceof ReflectionNamedType) {
+            return in_array($type->getName(), ['string', 'mixed'], true);
+        }
+
+        if ($type instanceof ReflectionUnionType) {
+            foreach ($type->getTypes() as $unionType) {
+                if ($this->acceptsString($unionType)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /**
      * @param IndexableField $indexableFieldInstance
      * @param ReflectionClass $entityReflection
      * @return void
-     * @throws ReflectionException
      * @throws DoctrineCryptException
      */
     protected function validateIndexAttributeValues(
@@ -98,62 +128,13 @@ class EntityAttributes
             );
         }
 
-        if (!$entityReflection->hasProperty($indexProperty)) {
+        if (!array_key_exists($indexProperty, $this->getProperties($entityReflection))) {
             throw new DoctrineCryptException(
                 sprintf(
                     'Indexable field %s has property value %s but no property exists in %s',
                     $indexableFieldInstance->getName(),
                     $indexProperty,
-                    $entityReflection->getProperty($indexProperty)->getName()));
-        }
-    }
-
-    protected function readFromCache(string $className): ?array
-    {
-        try {
-            if (!$this->cache->hasItem($className)) {
-                return null;
-            }
-
-            /** @var AttributeCachedItem $cacheItem */
-            $cacheItem = unserialize($this->cache->getItem($className));
-            if (!$cacheItem) {
-                $this->cache->removeItem($className);
-                return null;
-            }
-            $fileName = $cacheItem->getFilepath();
-            if (!is_readable($fileName)) {
-                $this->cache->removeItem($className);
-                return null;
-            }
-
-            $validator = new Hash([
-                'hash' => $cacheItem->getHash(),
-                'algorithm' => 'sha256',
-            ]);
-
-            if ($validator->isValid($fileName)) {
-                return $cacheItem->getAttributes();
-            }
-
-            $this->cache->removeItem($className);
-        } catch (ExceptionInterface) {
-        }
-
-        return null;
-    }
-
-    protected function cacheAttributes(string $className, string $filepath, array $attributes): void
-    {
-        $cacheItem = new AttributeCachedItem();
-        $cacheItem
-            ->setClassName($className)
-            ->setFilepath($filepath)
-            ->setHash(hash_file('sha256', $filepath))
-            ->setAttributes($attributes);
-        try {
-            $this->cache->addItem($className, serialize($cacheItem));
-        } catch (ExceptionInterface) {
+                    $entityReflection->getName()));
         }
     }
 }

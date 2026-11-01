@@ -2,15 +2,21 @@
 
 namespace FwsDoctrineCrypt;
 
-use Doctrine\ORM\EntityManager;
+use FwsDoctrineCrypt\Command\DecryptCommand;
+use FwsDoctrineCrypt\Command\EncryptCommand;
+use FwsDoctrineCrypt\Command\Service\MigrationCommandFactory;
 use FwsDoctrineCrypt\Filter\CryptIndex;
+use FwsDoctrineCrypt\Filter\Service\CryptIndexFactory;
+use FwsDoctrineCrypt\Listener\DoctrineEntitySubscriber;
+use FwsDoctrineCrypt\Listener\Service\DoctrineEntitySubscriberFactory;
 use FwsDoctrineCrypt\Model\Crypt;
 use FwsDoctrineCrypt\Model\EntityAttributes;
-use Laminas\Cache\Service\StorageAdapterFactoryInterface;
-use Laminas\Cache\Storage\Adapter\Filesystem;
-use Laminas\ServiceManager\AbstractFactory\ConfigAbstractFactory;
-use Psr\Container\ContainerInterface;
+use FwsDoctrineCrypt\Model\Service\CryptFactory;
 
+/**
+ * Configuration for Mezzio and other applications that use config providers.
+ * Everything here uses factory class names rather than closures, so it survives config caching.
+ */
 class ConfigProvider
 {
     /**
@@ -24,10 +30,8 @@ class ConfigProvider
         return [
             'dependencies' => $this->getDependenciesConfig(),
             'filters' => $this->getFilterConfig(),
-            ConfigAbstractFactory::class => $this->getConfigAbstractFactoryConfig(),
-            'doctrine-crypt' => [
-                'cache_dir' => '/tmp/cache',
-            ],
+            'laminas-cli' => $this->getCliConfig(),
+            'doctrine' => $this->getDoctrineConfig(),
         ];
     }
 
@@ -37,38 +41,14 @@ class ConfigProvider
     public function getDependenciesConfig(): array
     {
         return [
-            'abstract_factories' => [
-                ConfigAbstractFactory::class,
+            'invokables' => [
+                EntityAttributes::class => EntityAttributes::class,
             ],
             'factories' => [
-                EntityAttributes::class => ConfigAbstractFactory::class,
-                Crypt::class => ConfigAbstractFactory::class,
-                'crypt-cache' => function (ContainerInterface $container) {
-                    /** @var StorageAdapterFactoryInterface $storageFactory */
-                    $storageFactory = $container->get(StorageAdapterFactoryInterface::class);
-                    $config = $container->get('config');
-                    return $storageFactory->create(
-                        Filesystem::class,
-                        [
-                            'key_pattern' => '/^[a-z0-9_\+\-\\\\]*$/Di',
-                            'cache_dir' => $config['doctrine-crypt']['cache_dir'],
-                        ]
-                    );
-                }
-            ],
-        ];
-    }
-
-    public function getConfigAbstractFactoryConfig(): array
-    {
-        return [
-            EntityAttributes::class => [
-                'crypt-cache',
-            ],
-            Crypt::class => [
-                EntityManager::class,
-                EntityAttributes::class,
-                'config',
+                Crypt::class => CryptFactory::class,
+                DoctrineEntitySubscriber::class => DoctrineEntitySubscriberFactory::class,
+                EncryptCommand::class => MigrationCommandFactory::class,
+                DecryptCommand::class => MigrationCommandFactory::class,
             ],
         ];
     }
@@ -77,15 +57,37 @@ class ConfigProvider
     {
         return [
             'factories' => [
-                CryptIndex::class => function (ContainerInterface $container, $requestedName, ?array $options = null) {
-                    return new CryptIndex(
-                        $container->get(Crypt::class),
-                        $options,
-                    );
-                }
+                CryptIndex::class => CryptIndexFactory::class,
             ],
             'aliases' => [
                 'cryptIndex' => CryptIndex::class,
+            ],
+        ];
+    }
+
+    public function getCliConfig(): array
+    {
+        return [
+            'commands' => [
+                'doctrine-crypt:encrypt' => EncryptCommand::class,
+                'doctrine-crypt:decrypt' => DecryptCommand::class,
+            ],
+        ];
+    }
+
+    /**
+     * Attaches the subscriber to the default entity manager when using roave/psr-container-doctrine.
+     * Any other way of building the entity manager has to attach it itself. See the README.
+     */
+    public function getDoctrineConfig(): array
+    {
+        return [
+            'event_manager' => [
+                'orm_default' => [
+                    'subscribers' => [
+                        DoctrineEntitySubscriber::class,
+                    ],
+                ],
             ],
         ];
     }
