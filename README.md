@@ -79,7 +79,8 @@ Migrating existing data
 -----------------------
 
 Take a backup first. Both commands have a `--dry-run` option, are safe to run again and exit with a failure code if any
-record could not be processed.
+record could not be processed. They ask for confirmation before changing anything, unless run with `--no-interaction`
+(`-n`), so use that in deployment scripts.
 
 - `doctrine-crypt:encrypt` encrypts everything that is not already encrypted.
 - `doctrine-crypt:decrypt` decrypts everything that is encrypted, and clears nullable blind index columns.

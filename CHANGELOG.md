@@ -19,6 +19,6 @@ Entities now always hold plaintext, ciphertext is only written through the Doctr
 Loading a record that holds plaintext in an encrypted field, invalid attributes and unsupported column types now throw exceptions
 Encrypted columns must now be text types, use the type argument of EncryptedField for integers, floats and booleans
 Added support for null values and multiple blind indexes on a property
-Encrypt and decrypt commands now exit with a failure code if any record fails, and decrypt clears nullable blind indexes
+Encrypt and decrypt commands now exit with a failure code if any record fails, and decrypt clears nullable blind indexes, --no-interaction runs them without asking
 Removed the attribute cache and the cache_dir config
 Fixed the engine config being ignored

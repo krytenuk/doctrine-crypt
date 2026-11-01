@@ -119,13 +119,13 @@ abstract class AbstractCommand extends Command
                 '<warning>Please ensure you have a backup before continuing</warning>'
             ]);
             /**
-             * Confirm action with user
+             * Confirm action with user, unless running with --no-interaction
              * @var QuestionHelper $helper
              */
             $helper = $this->getHelper('question');
             $question = new ConfirmationQuestion('Do you wish to continue?', false);
 
-            if (!$helper->ask($this->input, $this->output, $question)) {
+            if ($this->input->isInteractive() && !$helper->ask($this->input, $this->output, $question)) {
                 return true;
             }
         }

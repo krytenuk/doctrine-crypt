@@ -59,7 +59,9 @@ final class MigrationCommandsTest extends TestCase
         string $commandClass,
         array $options = [],
         string $key = TestEnvironment::KEY,
-        ?EntityManager $entityManager = null
+        ?EntityManager $entityManager = null,
+        bool $interactive = true,
+        string $answer = 'y'
     ): string {
         $entityManager ??= $this->environment->entityManager(self::ENTITIES);
         $command = new $commandClass(
@@ -71,8 +73,8 @@ final class MigrationCommandsTest extends TestCase
         method_exists($application, 'addCommand') ? $application->addCommand($command) : $application->add($command);
 
         $tester = new CommandTester($command);
-        $tester->setInputs(['y']);
-        $this->exitCode = $tester->execute($options);
+        $tester->setInputs([$answer]);
+        $this->exitCode = $tester->execute($options, ['interactive' => $interactive]);
 
         return $tester->getDisplay();
     }
@@ -217,5 +219,34 @@ final class MigrationCommandsTest extends TestCase
         self::assertSame('42', $this->environment->database->tables['typed_row'][1]['age']);
         self::assertSame('1.5', $this->environment->database->tables['typed_row'][1]['score']);
         self::assertSame('0', $this->environment->database->tables['typed_row'][1]['active']);
+    }
+
+    public function testNoInteractionRunsWithoutAsking(): void
+    {
+        $output = $this->runCommand(EncryptCommand::class, interactive: false, answer: 'n');
+
+        self::assertSame(Command::SUCCESS, $this->exitCode);
+        self::assertStringStartsWith('brng:', $this->row()['email']);
+        self::assertStringNotContainsString('Do you wish to continue?', $output);
+        self::assertStringContainsString('Please ensure you have a backup', $output);
+    }
+
+    public function testNoInteractionWithDryRunWritesNothing(): void
+    {
+        $before = $this->row();
+
+        $this->runCommand(EncryptCommand::class, ['--dry-run' => true], interactive: false);
+
+        self::assertSame($before, $this->row());
+    }
+
+    public function testAnsweringNoAtThePromptChangesNothing(): void
+    {
+        $before = $this->row();
+
+        $output = $this->runCommand(EncryptCommand::class, answer: 'n');
+
+        self::assertStringContainsString('Do you wish to continue?', $output);
+        self::assertSame($before, $this->row());
     }
 }
