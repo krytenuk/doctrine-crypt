@@ -144,6 +144,8 @@ abstract class AbstractCommand extends Command
             /** Get doctrine crypt attributes for entity */
             try {
                 $attributes = $this->entityAttributes->getAttributes($entityClassName);
+                /** An entity whose only encrypted fields are in an embeddable would otherwise be skipped below */
+                $this->crypt->getEncryptedProperties($entityClassName);
             } catch (DoctrineCryptException|ReflectionException $e) {
                 $this->output->writeln("<error>Invalid crypt attributes for $entityClassName: {$e->getMessage()}</error>");
                 $failures++;

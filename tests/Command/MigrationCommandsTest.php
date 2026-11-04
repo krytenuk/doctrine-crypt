@@ -9,6 +9,7 @@ use FwsDoctrineCrypt\Command\AbstractCommand;
 use FwsDoctrineCrypt\Command\DecryptCommand;
 use FwsDoctrineCrypt\Command\EncryptCommand;
 use FwsDoctrineCrypt\Test\Support\TestEnvironment;
+use ParagonIE\CipherSweet\Backend\FIPSCrypto;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Console\Application;
 use Symfony\Component\Console\Command\Command;
@@ -61,13 +62,14 @@ final class MigrationCommandsTest extends TestCase
         string $key = TestEnvironment::KEY,
         ?EntityManager $entityManager = null,
         bool $interactive = true,
-        string $answer = 'y'
+        string $answer = 'y',
+        ?string $engine = null
     ): string {
         $entityManager ??= $this->environment->entityManager(self::ENTITIES);
         $command = new $commandClass(
             $entityManager,
             $this->environment->attributes(),
-            $this->environment->crypt($entityManager, $key)
+            $this->environment->crypt($entityManager, $key, $engine)
         );
         $application = new Application();
         method_exists($application, 'addCommand') ? $application->addCommand($command) : $application->add($command);
@@ -149,6 +151,36 @@ final class MigrationCommandsTest extends TestCase
             self::assertStringContainsString('Failed to process record', $output);
             self::assertSame($encrypted, $this->row());
         }
+    }
+
+    public function testOtherEngineFailsAndLeavesTheDataAlone(): void
+    {
+        $this->runCommand(EncryptCommand::class);
+        $encrypted = $this->row();
+
+        foreach ([EncryptCommand::class, DecryptCommand::class] as $command) {
+            $output = $this->runCommand($command, engine: FIPSCrypto::class);
+
+            self::assertSame(Command::FAILURE, $this->exitCode);
+            self::assertStringContainsString('Failed to process record', $output);
+            self::assertStringContainsString('the configured engine uses "fips:"', $output);
+            self::assertSame($encrypted, $this->row());
+        }
+    }
+
+    public function testEngineCanBeChangedByDecryptingFirst(): void
+    {
+        $this->runCommand(EncryptCommand::class);
+        $this->runCommand(DecryptCommand::class);
+        $this->runCommand(EncryptCommand::class, engine: FIPSCrypto::class);
+
+        self::assertSame(Command::SUCCESS, $this->exitCode);
+        self::assertStringStartsWith('fips:', $this->row()['email']);
+
+        $this->runCommand(DecryptCommand::class, engine: FIPSCrypto::class);
+
+        self::assertSame(Command::SUCCESS, $this->exitCode);
+        self::assertSame('someone@example.com', $this->row()['email']);
     }
 
     public function testDecryptClearsNullableBlindIndex(): void

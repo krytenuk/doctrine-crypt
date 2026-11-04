@@ -4,6 +4,7 @@ namespace FwsDoctrineCrypt;
 
 use FwsDoctrineCrypt\Command\DecryptCommand;
 use FwsDoctrineCrypt\Command\EncryptCommand;
+use FwsDoctrineCrypt\Command\GenerateKeyCommand;
 use FwsDoctrineCrypt\Command\Service\MigrationCommandFactory;
 use FwsDoctrineCrypt\Filter\CryptIndex;
 use FwsDoctrineCrypt\Filter\Service\CryptIndexFactory;
@@ -43,6 +44,7 @@ class ConfigProvider
         return [
             'invokables' => [
                 EntityAttributes::class => EntityAttributes::class,
+                GenerateKeyCommand::class => GenerateKeyCommand::class,
             ],
             'factories' => [
                 Crypt::class => CryptFactory::class,
@@ -71,6 +73,7 @@ class ConfigProvider
             'commands' => [
                 'doctrine-crypt:encrypt' => EncryptCommand::class,
                 'doctrine-crypt:decrypt' => DecryptCommand::class,
+                'doctrine-crypt:generate-key' => GenerateKeyCommand::class,
             ],
         ];
     }

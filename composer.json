@@ -8,6 +8,7 @@
     "doctrine/event-manager": "^1.2 || ^2.0",
     "laminas/laminas-filter": "^2.40",
     "paragonie/ciphersweet": "^4.7",
+    "paragonie/constant_time_encoding": "^2.0 || ^3.0",
     "psr/container": "^1.1 || ^2.0",
     "symfony/console": "^5.4 || ^6.0 || ^7.0 || ^8.0"
   },

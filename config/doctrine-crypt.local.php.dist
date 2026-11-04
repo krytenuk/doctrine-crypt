@@ -8,7 +8,7 @@ return [
             'engine' => Backend\BoringCrypto::class, // <- Ciphersweet engine to use
                         // ParagonIE\CipherSweet\Backend\BoringCrypto or ParagonIE\CipherSweet\Backend\FIPSCrypto
             'encryptionKey' => 'your_encryption_key', // <- 32 raw bytes, 64 hex characters or 44 base64url characters
-                        // you can use ParagonIE\ConstantTime\Hex::encode(random_bytes(32)) to generate a random key
+                        // you can use the doctrine-crypt:generate-key command to generate a random key
         ],
         // Optional. The container name of the entity manager, if not Doctrine\ORM\EntityManagerInterface
         // 'entity_manager' => 'doctrine.entity_manager.orm_default',

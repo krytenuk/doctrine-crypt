@@ -9,6 +9,9 @@ use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Mapping\ClassMetadata;
 use FwsDoctrineCrypt\Exception\DoctrineCryptException;
 use FwsDoctrineCrypt\Mapping\EncryptedField as MappedEncryptedField;
+use ParagonIE\CipherSweet\Backend\BoringCrypto;
+use ParagonIE\CipherSweet\Backend\FIPSCrypto;
+use ParagonIE\CipherSweet\Backend\ModernCrypto;
 use ParagonIE\CipherSweet\BlindIndex;
 use ParagonIE\CipherSweet\CipherSweet;
 use ParagonIE\CipherSweet\Contract\BackendInterface;
@@ -31,6 +34,12 @@ use TypeError;
  */
 class Crypt
 {
+    private const CIPHERTEXT_HEADERS = [
+        BoringCrypto::MAGIC_HEADER,
+        FIPSCrypto::MAGIC_HEADER,
+        ModernCrypto::MAGIC_HEADER,
+    ];
+
     private CipherSweet|null $engine = null;
 
     /**
@@ -106,9 +115,21 @@ class Crypt
     public function getEncryptedProperties(string $entityClassName): array
     {
         $metadata = $this->getMetadata($entityClassName);
+        $attributes = $this->getAttributes($metadata->getName());
+
+        foreach ($metadata->embeddedClasses as $property => $embedded) {
+            if (isset($attributes[$property]) || $this->getAttributes($embedded['class'])) {
+                throw new DoctrineCryptException(sprintf(
+                    '%s::$%s is an embeddable with encrypted fields, which are not supported. '
+                    . 'Its values would be stored unencrypted, so map them on the entity instead',
+                    $metadata->getName(),
+                    $property
+                ));
+            }
+        }
 
         return array_values(array_filter(
-            array_keys($this->getAttributes($metadata->getName())),
+            array_keys($attributes),
             static fn(string $property): bool => isset($metadata->fieldMappings[$property])
         ));
     }
@@ -262,14 +283,33 @@ class Crypt
      *
      * A value with the ciphertext header that does not decrypt throws rather than counting as plaintext.
      * Otherwise running a migration with the wrong key would encrypt existing ciphertext a second time.
+     * A value with another engine's header throws for the same reason, as this engine cannot decrypt it.
      *
      * @throws CryptoOperationException
      * @throws DoctrineCryptException
      */
     private function isEncryptedValue(string $entityClassName, string $property, mixed $value): bool
     {
+        if (!is_string($value)) {
+            return false;
+        }
+
         $header = $this->getEngine()->getBackend()->getPrefix();
-        if (!is_string($value) || !str_starts_with($value, $header)) {
+        foreach (self::CIPHERTEXT_HEADERS as $otherHeader) {
+            if ($otherHeader !== $header && str_starts_with($value, $otherHeader)) {
+                throw new DoctrineCryptException(sprintf(
+                    '%s::$%s starts with the ciphertext header "%s" but the configured engine uses "%s". '
+                    . 'Decrypt the data with its original engine, or check whether the value is plaintext that starts with "%s".',
+                    $entityClassName,
+                    $property,
+                    $otherHeader,
+                    $header,
+                    $otherHeader
+                ));
+            }
+        }
+
+        if (!str_starts_with($value, $header)) {
             return false;
         }
 

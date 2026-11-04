@@ -9,6 +9,7 @@ use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Mapping\Driver\AttributeDriver;
 use FwsDoctrineCrypt\Command\DecryptCommand;
 use FwsDoctrineCrypt\Command\EncryptCommand;
+use FwsDoctrineCrypt\Command\GenerateKeyCommand;
 use FwsDoctrineCrypt\ConfigProvider;
 use FwsDoctrineCrypt\Filter\CryptIndex;
 use FwsDoctrineCrypt\Filter\Service\CryptIndexFactory;
@@ -93,6 +94,16 @@ final class ContainerWiringTest extends TestCase
         self::assertInstanceOf(EncryptCommand::class, $container->get($commands['doctrine-crypt:encrypt']));
         self::assertInstanceOf(DecryptCommand::class, $container->get($commands['doctrine-crypt:decrypt']));
         self::assertSame('doctrine-crypt:encrypt', $container->get($commands['doctrine-crypt:encrypt'])->getName());
+    }
+
+    public function testGenerateKeyCommandResolvesWithoutAnyConfig(): void
+    {
+        $provider = (new ConfigProvider())();
+        $name = 'doctrine-crypt:generate-key';
+        $command = (new ServiceManager($provider['dependencies']))->get($provider['laminas-cli']['commands'][$name]);
+
+        self::assertInstanceOf(GenerateKeyCommand::class, $command);
+        self::assertSame($name, $command->getName());
     }
 
     public function testFilterFactoryPassesOptions(): void

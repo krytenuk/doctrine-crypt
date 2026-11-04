@@ -93,6 +93,35 @@ final class CryptMigrationTest extends TestCase
         self::assertSame($email, $person->getEmail());
     }
 
+    public function testPlaintextEncryptionRefusesCiphertextFromAnotherEngine(): void
+    {
+        $entityManager = $this->environment->entityManager();
+        $person = new Person('person@example.com', '0123');
+        $this->environment->crypt($entityManager)->encryptPlaintext($person);
+        $email = $person->getEmail();
+
+        try {
+            $this->environment->crypt($entityManager, engine: FIPSCrypto::class)->encryptPlaintext($person);
+            self::fail('Expected encryptPlaintext to refuse');
+        } catch (DoctrineCryptException $exception) {
+            self::assertStringContainsString('"brng:" but the configured engine uses "fips:"', $exception->getMessage());
+        }
+
+        self::assertSame($email, $person->getEmail());
+    }
+
+    public function testDecryptEncryptedRefusesCiphertextFromAnotherEngine(): void
+    {
+        $entityManager = $this->environment->entityManager();
+        $person = new Person('person@example.com', '0123');
+        $this->environment->crypt($entityManager, engine: FIPSCrypto::class)->encryptPlaintext($person);
+
+        $this->expectException(DoctrineCryptException::class);
+        $this->expectExceptionMessage('"fips:" but the configured engine uses "brng:"');
+
+        $this->environment->crypt($entityManager)->decryptEncrypted($person);
+    }
+
     public function testDecryptEncryptedRestoresValues(): void
     {
         $crypt = $this->environment->crypt($this->environment->entityManager());

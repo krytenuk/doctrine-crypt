@@ -17,8 +17,11 @@ Changed encryption to CipherSweet, configured with attributes on entities (not c
 Added Mezzio support through ConfigProvider and removed Laminas MVC support, including Module and the decrypt view helper
 Entities now always hold plaintext, ciphertext is only written through the Doctrine change set
 Loading a record that holds plaintext in an encrypted field, invalid attributes and unsupported column types now throw exceptions
+Encrypted fields in embeddables now throw an exception instead of being stored unencrypted
+Encrypt and decrypt commands now refuse ciphertext from a different engine instead of encrypting it a second time
 Encrypted columns must now be text types, use the type argument of EncryptedField for integers, floats and booleans
 Added support for null values and multiple blind indexes on a property
 Encrypt and decrypt commands now exit with a failure code if any record fails, and decrypt clears nullable blind indexes, --no-interaction runs them without asking
+Added doctrine-crypt:generate-key command to output a random encryption key
 Removed the attribute cache and the cache_dir config
 Fixed the engine config being ignored
